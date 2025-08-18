@@ -20,7 +20,8 @@ import (
 const OS_PERMISSION os.FileMode = 0755
 
 type Config struct {
-	Tools []Tool `yaml:"tools"`
+	GlobalEnv map[string]string `yaml:"env"`
+	Tools     []Tool            `yaml:"tools"`
 }
 
 type Tool struct {
@@ -41,7 +42,7 @@ func main() {
 		Name:  "toolenv",
 		Usage: "A virtual tool environment manager",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return setup("env")
+			return setup(".env")
 		},
 	}
 
@@ -95,7 +96,7 @@ func setup(env_name string) error {
 		fmt.Printf("|- Done!\n\n")
 	}
 
-	if err := generateActivationScript(env_name, config.Tools); err != nil {
+	if err := generateActivationScript(env_name, config); err != nil {
 		return err
 	}
 
@@ -218,7 +219,7 @@ func extractTarXz(filename, install_dir string) error {
 	return cmd.Run()
 }
 
-func generateActivationScript(env_name string, tools []Tool) error {
+func generateActivationScript(env_name string, config *Config) error {
 	activate_dir := filepath.Join(env_name, "bin", "activate")
 
 	var sb strings.Builder
@@ -228,11 +229,15 @@ func generateActivationScript(env_name string, tools []Tool) error {
 	sb.WriteString(fmt.Sprintf("export TOOLENV_DIR=\"$(pwd)/%s\"\n", env_name))
 	sb.WriteString("export PREVIOUS_PATH=\"$PATH\"\n")
 
-	for _, tool := range tools {
+	for k, v := range config.GlobalEnv {
+		sb.WriteString(fmt.Sprintf("export %s=\"%s\"\n", k, v))
+	}
+
+	for _, tool := range config.Tools {
 		for key, value := range tool.Env {
 			escaped_value := strings.ReplaceAll(value, `"`, `\"`)
 
-			tmpl, err := template.New("env").Parse(escaped_value)
+			tmpl, err := template.New(env_name).Parse(escaped_value)
 
 			if err != nil {
 				return err
@@ -257,12 +262,16 @@ func generateActivationScript(env_name string, tools []Tool) error {
 	}
 
 	sb.WriteString("export OLD_PS1=\"$PS1\"\n")
-	sb.WriteString("export PS1=\"(toolenv:env) $PS1\"\n")
+	sb.WriteString("export PS1=\"(toolenv) $PS1\"\n")
 	sb.WriteString("deactivate() {\n")
 	sb.WriteString("\texport PS1=\"$OLD_PS1\"\n")
 	sb.WriteString("\tunset OLD_PS1\n")
 
-	for _, tool := range tools {
+	for k := range config.GlobalEnv {
+		sb.WriteString(fmt.Sprintf("unset %s\n", k))
+	}
+
+	for _, tool := range config.Tools {
 		for key := range tool.Env {
 			if key == "PATH" {
 				continue
